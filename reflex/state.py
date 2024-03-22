@@ -2159,6 +2159,19 @@ class StateManagerMemory(StateManager):
             await self.set_state(token, state)
 
 
+_original_reducer_override = cloudpickle.CloudPickler.reducer_override
+def _reducer_override(self, obj):
+    if isinstance(obj, type(State.validate.__func__)):
+        # Ignore cythonized methods from pydantic
+        print(f"Ignoring cythonized func {obj}")
+        return cloudpickle.CloudPickler._function_reduce(self, lambda *args: True)
+    if isinstance(obj, type) and issubclass(obj, BaseState) and "<locals>" in obj.__qualname__:
+        print(f"Getting fancy with state {obj}")
+        return State.get_class_substate, (obj.get_full_name(),)
+    return _original_reducer_override(self, obj)
+cloudpickle.CloudPickler.reducer_override = _reducer_override
+
+
 class StateManagerRedis(StateManager):
     """A state manager that stores states in redis."""
 
