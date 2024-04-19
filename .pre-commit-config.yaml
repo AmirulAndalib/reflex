@@ -1,3 +1,5 @@
+fail_fast: true
+
 repos:
   - repo: https://github.com/psf/black
     rev: 22.10.0
@@ -32,4 +34,4 @@ repos:
         always_run: true
         language: system
         description: 'Update pyi files as needed'
-        entry: python scripts/pyi_generator.py
+        entry: python scripts/make_pyi.py

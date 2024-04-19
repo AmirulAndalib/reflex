@@ -1,3 +1,4 @@
+from reflex.experimental import _x as _x
 from reflex import admin as admin
 from reflex.admin import AdminDash as AdminDash
 from reflex import app as app
@@ -96,6 +97,7 @@ from reflex.components import list_item as list_item
 from reflex.components import unordered_list as unordered_list
 from reflex.components import ordered_list as ordered_list
 from reflex.components import moment as moment
+from reflex.components import logo as logo
 from reflex.components.component import Component as Component
 from reflex.components.component import NoSSRComponent as NoSSRComponent
 from reflex.components.component import memo as memo
@@ -114,6 +116,7 @@ from reflex import constants as constants
 from reflex.constants import Env as Env
 from reflex import event as event
 from reflex.event import EventChain as EventChain
+from reflex.event import EventHandler as EventHandler
 from reflex.event import background as background
 from reflex.event import call_script as call_script
 from reflex.event import clear_local_storage as clear_local_storage
@@ -125,6 +128,7 @@ from reflex.event import remove_cookie as remove_cookie
 from reflex.event import remove_local_storage as remove_local_storage
 from reflex.event import set_clipboard as set_clipboard
 from reflex.event import set_focus as set_focus
+from reflex.event import scroll_to as scroll_to
 from reflex.event import set_value as set_value
 from reflex.event import stop_propagation as stop_propagation
 from reflex.event import upload_files as upload_files
@@ -140,6 +144,7 @@ from reflex import state as state
 from reflex.state import var as var
 from reflex.state import Cookie as Cookie
 from reflex.state import LocalStorage as LocalStorage
+from reflex.state import ComponentState as ComponentState
 from reflex.state import State as State
 from reflex import style as style
 from reflex.style import toggle_color_mode as toggle_color_mode

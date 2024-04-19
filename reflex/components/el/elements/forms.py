@@ -1,8 +1,9 @@
 """Element classes. This is an auto-generated file. Do not edit. See ../generate.py."""
+
 from __future__ import annotations
 
 from hashlib import md5
-from typing import Any, Dict, Iterator, Union
+from typing import Any, Dict, Iterator, Set, Union
 
 from jinja2 import Environment
 
@@ -162,7 +163,9 @@ class Form(BaseHTML):
         props["handle_submit_unique_name"] = ""
         form = super().create(*children, **props)
         form.handle_submit_unique_name = md5(
-            str(form.get_hooks_internal().union(form.get_hooks())).encode("utf-8")
+            str({**form._get_all_hooks_internal(), **form._get_all_hooks()}).encode(
+                "utf-8"
+            )
         ).hexdigest()
         return form
 
@@ -207,7 +210,7 @@ class Form(BaseHTML):
     def _get_form_refs(self) -> Dict[str, Any]:
         # Send all the input refs to the handler.
         form_refs = {}
-        for ref in self.get_refs():
+        for ref in self._get_all_refs():
             # when ref start with refs_ it's an array of refs, so we need different method
             # to collect data
             if ref.startswith("refs_"):
@@ -500,6 +503,36 @@ class Select(BaseHTML):
         }
 
 
+AUTO_HEIGHT_JS = """
+const autoHeightOnInput = (e, is_enabled) => {
+    if (is_enabled) {
+        const el = e.target;
+        el.style.overflowY = "hidden";
+        el.style.height = "auto";
+        el.style.height = (e.target.scrollHeight) + "px";
+        if (el.form && !el.form.data_resize_on_reset) {
+            el.form.addEventListener("reset", () => window.setTimeout(() => autoHeightOnInput(e, is_enabled), 0))
+            el.form.data_resize_on_reset = true;
+        }
+    }
+}
+"""
+
+
+ENTER_KEY_SUBMIT_JS = """
+const enterKeySubmitOnKeyDown = (e, is_enabled) => {
+    if (is_enabled && e.which === 13 && !e.shiftKey) {
+        e.preventDefault();
+        if (!e.repeat) {
+            if (e.target.form) {
+                e.target.form.requestSubmit();
+            }
+        }
+    }
+}
+"""
+
+
 class Textarea(BaseHTML):
     """Display the textarea element."""
 
@@ -511,6 +544,9 @@ class Textarea(BaseHTML):
     # Automatically focuses the textarea when the page loads
     auto_focus: Var[Union[str, int, bool]]
 
+    # Automatically fit the content height to the text (use min-height with this prop)
+    auto_height: Var[bool]
+
     # Visible width of the text control, in average character widths
     cols: Var[Union[str, int, bool]]
 
@@ -519,6 +555,9 @@ class Textarea(BaseHTML):
 
     # Disables the textarea
     disabled: Var[Union[str, int, bool]]
+
+    # Enter key submits form (shift-enter adds new line)
+    enter_key_submit: Var[bool]
 
     # Associates the textarea with a form (by id)
     form: Var[Union[str, int, bool]]
@@ -549,6 +588,47 @@ class Textarea(BaseHTML):
 
     # How the text in the textarea is to be wrapped when submitting the form
     wrap: Var[Union[str, int, bool]]
+
+    def _exclude_props(self) -> list[str]:
+        return super()._exclude_props() + [
+            "auto_height",
+            "enter_key_submit",
+        ]
+
+    def _get_all_custom_code(self) -> Set[str]:
+        """Include the custom code for auto_height and enter_key_submit functionality.
+
+        Returns:
+            The custom code for the component.
+        """
+        custom_code = super()._get_all_custom_code()
+        if self.auto_height is not None:
+            custom_code.add(AUTO_HEIGHT_JS)
+        if self.enter_key_submit is not None:
+            custom_code.add(ENTER_KEY_SUBMIT_JS)
+        return custom_code
+
+    def _render(self) -> Tag:
+        tag = super()._render()
+        if self.enter_key_submit is not None:
+            if "on_key_down" in self.event_triggers:
+                raise ValueError(
+                    "Cannot combine `enter_key_submit` with `on_key_down`.",
+                )
+            tag.add_props(
+                on_key_down=Var.create_safe(
+                    f"(e) => enterKeySubmitOnKeyDown(e, {self.enter_key_submit._var_name_unwrapped})",
+                    _var_is_local=False,
+                )._replace(merge_var_data=self.enter_key_submit._var_data),
+            )
+        if self.auto_height is not None:
+            tag.add_props(
+                on_input=Var.create_safe(
+                    f"(e) => autoHeightOnInput(e, {self.auto_height._var_name_unwrapped})",
+                    _var_is_local=False,
+                )._replace(merge_var_data=self.auto_height._var_data),
+            )
+        return tag
 
     def get_event_triggers(self) -> Dict[str, Any]:
         """Get the event triggers that pass the component's value to the handler.

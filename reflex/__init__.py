@@ -110,9 +110,11 @@ _ALL_COMPONENTS = [
     "unordered_list",
     "ordered_list",
     "moment",
+    "logo",
 ]
 
 _MAPPING = {
+    "reflex.experimental": ["_x"],
     "reflex.admin": ["admin", "AdminDash"],
     "reflex.app": ["app", "App", "UploadFile"],
     "reflex.base": ["base", "Base"],
@@ -132,6 +134,7 @@ _MAPPING = {
     "reflex.event": [
         "event",
         "EventChain",
+        "EventHandler",
         "background",
         "call_script",
         "clear_local_storage",
@@ -143,6 +146,7 @@ _MAPPING = {
         "remove_local_storage",
         "set_clipboard",
         "set_focus",
+        "scroll_to",
         "set_value",
         "stop_propagation",
         "upload_files",
@@ -152,7 +156,14 @@ _MAPPING = {
     "reflex.model": ["model", "session", "Model"],
     "reflex.page": ["page"],
     "reflex.route": ["route"],
-    "reflex.state": ["state", "var", "Cookie", "LocalStorage", "State"],
+    "reflex.state": [
+        "state",
+        "var",
+        "Cookie",
+        "LocalStorage",
+        "ComponentState",
+        "State",
+    ],
     "reflex.style": ["style", "toggle_color_mode"],
     "reflex.testing": ["testing"],
     "reflex.utils": ["utils"],
@@ -189,7 +200,7 @@ def _removeprefix(text, prefix):
     return text[text.startswith(prefix) and len(prefix) :]
 
 
-__all__ = [_removeprefix(mod, "reflex.") for mod in _MAPPING]
+__all__ = (_removeprefix(mod, "reflex.") for mod in _MAPPING)
 
 
 def __getattr__(name: str) -> Type:

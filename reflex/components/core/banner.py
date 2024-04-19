@@ -17,13 +17,12 @@ from reflex.components.radix.themes.components.dialog import (
 from reflex.components.radix.themes.layout import Flex
 from reflex.components.radix.themes.typography.text import Text
 from reflex.constants import Dirs, Hooks, Imports
-from reflex.state import State
 from reflex.utils import imports
 from reflex.vars import Var, VarData
 
 connect_error_var_data: VarData = VarData(  # type: ignore
     imports=Imports.EVENTS,
-    hooks={Hooks.EVENTS},
+    hooks={Hooks.EVENTS: None},
 )
 
 connection_error: Var = Var.create_safe(
@@ -199,7 +198,7 @@ class ConnectionPulser(Div):
         """
         return super().create(
             cond(
-                ~State.is_hydrated | has_connection_errors,  # type: ignore
+                has_connection_errors,
                 WifiOffPulse.create(**props),
             ),
             position="fixed",

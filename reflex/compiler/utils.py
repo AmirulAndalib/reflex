@@ -3,10 +3,19 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Callable, Dict, Optional, Type, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Type, Union
 from urllib.parse import urlparse
 
-from pydantic.fields import ModelField
+try:
+    # TODO The type checking guard can be removed once
+    # reflex-hosting-cli tools are compatible with pydantic v2
+
+    if not TYPE_CHECKING:
+        from pydantic.v1.fields import ModelField
+    else:
+        raise ModuleNotFoundError
+except ModuleNotFoundError:
+    from pydantic.fields import ModelField
 
 from reflex import constants
 from reflex.components.base import (
@@ -243,7 +252,7 @@ def compile_custom_component(
     # Get the imports.
     imports = {
         lib: fields
-        for lib, fields in render.get_imports().items()
+        for lib, fields in render._get_all_imports().items()
         if lib != component.library
     }
 
@@ -256,8 +265,8 @@ def compile_custom_component(
             "name": component.tag,
             "props": props,
             "render": render.render(),
-            "hooks": render.get_hooks_internal() | render.get_hooks(),
-            "custom_code": render.get_custom_code(),
+            "hooks": {**render._get_all_hooks_internal(), **render._get_all_hooks()},
+            "custom_code": render._get_all_custom_code(),
         },
         imports,
     )

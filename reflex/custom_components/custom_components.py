@@ -9,17 +9,31 @@ import sys
 from collections import namedtuple
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
+import httpx
+import tomlkit
 import typer
+from tomlkit.exceptions import TOMLKitError
 
 from reflex import constants
 from reflex.config import get_config
 from reflex.constants import CustomComponents
 from reflex.utils import console
+from reflex.utils.pyi_generator import PyiGenerator
 
 config = get_config()
 custom_components_cli = typer.Typer()
+
+POST_CUSTOM_COMPONENTS_GALLERY_ENDPOINT = (
+    f"{config.cp_backend_url}/custom-components/gallery"
+)
+
+GET_CUSTOM_COMPONENTS_GALLERY_BY_NAME_ENDPOINT = (
+    f"{config.cp_backend_url}/custom-components/gallery"
+)
+
+POST_CUSTOM_COMPONENTS_GALLERY_TIMEOUT = 15
 
 
 @contextmanager
@@ -55,6 +69,28 @@ def _create_package_config(module_name: str, package_name: str):
                 module_name=module_name, package_name=package_name
             )
         )
+
+
+def _get_package_config(exit_on_fail: bool = True) -> dict:
+    """Get the package configuration from the pyproject.toml file.
+
+    Args:
+        exit_on_fail: Whether to exit if the pyproject.toml file is not found.
+
+    Returns:
+        The package configuration.
+
+    Raises:
+        Exit: If the pyproject.toml file is not found.
+    """
+    try:
+        with open(CustomComponents.PYPROJECT_TOML, "rb") as f:
+            return dict(tomlkit.load(f))
+    except (OSError, TOMLKitError) as ex:
+        console.error(f"Unable to read from pyproject.toml due to {ex}")
+        if exit_on_fail:
+            raise typer.Exit(code=1) from ex
+        raise
 
 
 def _create_readme(module_name: str, package_name: str):
@@ -131,7 +167,7 @@ def _populate_demo_app(name_variants: NameVariants):
 
     with set_directory(demo_app_dir):
         # We start with the blank template as basis.
-        _init(name=demo_app_name, template=constants.Templates.Kind.BLANK)
+        _init(name=demo_app_name, template=constants.Templates.DEFAULT)
         # Then overwrite the app source file with the one we want for testing custom components.
         # This source file is rendered using jinja template file.
         with open(f"{demo_app_name}/{demo_app_name}.py", "w") as f:
@@ -400,6 +436,16 @@ def _run_commands_in_subprocess(cmds: list[str]) -> bool:
         return False
 
 
+def _make_pyi_files():
+    """Create pyi files for the custom component."""
+    package_name = _get_package_config()["project"]["name"]
+
+    for dir, _, _ in os.walk(f"./{package_name}"):
+        if "__pycache__" in dir:
+            continue
+        PyiGenerator().scan_all([dir])
+
+
 def _run_build():
     """Run the build command.
 
@@ -407,6 +453,8 @@ def _run_build():
         Exit: If the build fails.
     """
     console.print("Building custom component...")
+
+    _make_pyi_files()
 
     cmds = [sys.executable, "-m", "build", "."]
     if _run_commands_in_subprocess(cmds):
@@ -486,28 +534,10 @@ def _validate_credentials(
 def _get_version_to_publish() -> str:
     """Get the version to publish from the pyproject.toml.
 
-    Raises:
-        Exit: If the version is not found in the pyproject.toml.
-
     Returns:
         The version to publish.
     """
-    # Get the version from the pyproject.toml.
-    version_to_publish = None
-    with open(CustomComponents.PYPROJECT_TOML, "r") as f:
-        pyproject_toml = f.read()
-        # Note below does not capture non-matching quotes. Not performing full syntax check here.
-        match = re.search(r'version\s*=\s*["\'](.*?)["\']', pyproject_toml)
-        if match:
-            version_to_publish = match.group(1)
-            console.debug(f"Version to be published: {version_to_publish}")
-    if not version_to_publish:
-        console.error(
-            f"Could not find the version to be published in {CustomComponents.PYPROJECT_TOML}"
-        )
-        raise typer.Exit(code=1)
-
-    return version_to_publish
+    return _get_package_config()["project"]["version"]
 
 
 def _ensure_dist_dir(version_to_publish: str, build: bool):
@@ -542,7 +572,7 @@ def _ensure_dist_dir(version_to_publish: str, build: bool):
             needs_rebuild = (
                 console.ask(
                     "Distribution files for the version to be published already exist. Do you want to rebuild?",
-                    choices=["n", "y"],
+                    choices=["y", "n"],
                     default="n",
                 )
                 == "y"
@@ -601,6 +631,14 @@ def publish(
         True,
         help="Whether to build the package before publishing. If the package is already built, set this to False.",
     ),
+    share: bool = typer.Option(
+        True,
+        help="Whether to prompt to share more details on the published package. Only applicable when published to PyPI. Defaults to True.",
+    ),
+    validate_project_info: bool = typer.Option(
+        True,
+        help="Whether to interactively validate the project information in the pyproject.toml file.",
+    ),
     loglevel: constants.LogLevel = typer.Option(
         config.loglevel, help="The log level to use."
     ),
@@ -613,6 +651,8 @@ def publish(
         username: The username to use for authentication on python package repository.
         password: The password to use for authentication on python package repository.
         build: Whether to build the distribution files. Defaults to True.
+        share: Whether to prompt to share more details on the published package. Defaults to True.
+        validate_project_info: whether to interactively validate the project information in the pyproject.toml file. Defaults to True.
         loglevel: The log level to use.
 
     Raises:
@@ -633,6 +673,16 @@ def publish(
     # Validate the distribution directory.
     _ensure_dist_dir(version_to_publish=version_to_publish, build=build)
 
+    if validate_project_info and (
+        console.ask(
+            "Would you like to interactively review the package information?",
+            choices=["y", "n"],
+            default="y",
+        )
+        == "y"
+    ):
+        _validate_project_info()
+
     publish_cmds = [
         sys.executable,
         "-m",
@@ -651,3 +701,238 @@ def publish(
         console.info("Custom component published successfully!")
     else:
         raise typer.Exit(1)
+
+    # Only prompt to share more details on the published package if it is published to PyPI.
+    if repository != "pypi" or not share:
+        return
+
+    # Ask user to share more details on the published package.
+    if (
+        console.ask(
+            "Would you like to include your published component on our gallery?",
+            choices=["y", "n"],
+            default="y",
+        )
+        == "n"
+    ):
+        console.print(
+            "If you decide to do this later, you can run `reflex component share` command. Thank you!"
+        )
+        return
+
+    _collect_details_for_gallery()
+
+
+def _process_entered_list(input: str | None) -> list | None:
+    """Process the user entered comma separated list into a list if applicable.
+
+    Args:
+        input: the user entered comma separated list
+
+    Returns:
+        The list of items or None.
+    """
+    return [t.strip() for t in (input or "").split(",") if t if input] or None
+
+
+def _validate_project_info():
+    """Validate the project information in the pyproject.toml file.
+
+    Raises:
+        Exit: If the pyproject.toml file is ill-formed.
+    """
+    pyproject_toml = _get_package_config()
+
+    try:
+        project = pyproject_toml.get("project", {})
+        if not project:
+            console.error("The project section not found in pyproject.toml")
+            raise typer.Exit(code=1)
+        console.print(
+            f'Double check the information before publishing: {project["name"]} version {project["version"]}'
+        )
+    except KeyError as ke:
+        console.error(f"The pyproject.toml is possibly ill-formed due to {ke}")
+        raise typer.Exit(code=1) from ke
+
+    console.print("Update or enter to keep the current information.")
+    project["description"] = console.ask(
+        "short description", default=project.get("description", "")
+    )
+    # PyPI only shows the first author.
+    author = project.get("authors", [{}])[0]
+    author["name"] = console.ask(f"Author Name", default=author.get("name", ""))
+    author["email"] = console.ask(f"Author Email", default=author.get("email", ""))
+
+    console.print(f'Current keywords are: {project.get("keywords") or []}')
+    keyword_action = console.ask(
+        "Keep, replace or append?", choices=["k", "r", "a"], default="k"
+    )
+    new_keywords = []
+    if keyword_action == "r":
+        new_keywords = (
+            _process_entered_list(
+                console.ask("Enter new set of keywords separated by commas")
+            )
+            or []
+        )
+        project["keywords"] = new_keywords
+    elif keyword_action == "a":
+        new_keywords = (
+            _process_entered_list(
+                console.ask("Enter new set of keywords separated by commas")
+            )
+            or []
+        )
+        project["keywords"] = project.get("keywords", []) + new_keywords
+
+    if not project.get("urls"):
+        project["urls"] = {}
+    project["urls"]["homepage"] = console.ask(
+        "homepage URL", default=project["urls"].get("homepage", "")
+    )
+    project["urls"]["source"] = console.ask(
+        "source code URL", default=project["urls"].get("source", "")
+    )
+    pyproject_toml["project"] = project
+    try:
+        with open(CustomComponents.PYPROJECT_TOML, "w") as f:
+            tomlkit.dump(pyproject_toml, f)
+    except (OSError, TOMLKitError) as ex:
+        console.error(f"Unable to write to pyproject.toml due to {ex}")
+        raise typer.Exit(code=1) from ex
+
+
+def _collect_details_for_gallery():
+    """Helper to collect details on the custom component to be included in the gallery.
+
+    Raises:
+        Exit: If pyproject.toml file is ill-formed or the request to the backend services fails.
+    """
+    from reflex.reflex import _login
+
+    console.rule("[bold]Authentication with Reflex Services")
+    console.print("First let's log in to Reflex backend services.")
+    access_token = _login()
+
+    console.rule("[bold]Custom Component Information")
+    params = {}
+    package_name = None
+    try:
+        package_name = _get_package_config(exit_on_fail=False)["project"]["name"]
+    except (TOMLKitError, KeyError) as ex:
+        console.debug(
+            f"Unable to read from pyproject.toml in current directory due to {ex}"
+        )
+        package_name = console.ask("[ Published python package name ]")
+    console.print(f"[ Custom component package name ] : {package_name}")
+    params["package_name"] = package_name
+
+    # Check the backend services if the user is allowed to update information of this package is already shared.
+    try:
+        console.debug(
+            f"Checking if user has permission to upsert information for {package_name} by POST."
+        )
+        # Send a POST request to achieve two things at once:
+        # 1. Check if the package is already shared by the user. If not, the backend will return 403.
+        # 2. If this package is not shared before, this request records the package name in the backend.
+        response = httpx.post(
+            POST_CUSTOM_COMPONENTS_GALLERY_ENDPOINT,
+            headers={"Authorization": f"Bearer {access_token}"},
+            data=params,
+        )
+        if response.status_code == httpx.codes.FORBIDDEN:
+            console.error(
+                f"{package_name} is owned by another user. Unable to update the information for it."
+            )
+            raise typer.Exit(code=1)
+        response.raise_for_status()
+    except httpx.HTTPError as he:
+        console.error(f"Unable to complete request due to {he}.")
+        raise typer.Exit(code=1) from he
+
+    files = []
+    if (image_file_and_extension := _get_file_from_prompt_in_loop()) is not None:
+        files.append(
+            ("files", (image_file_and_extension[1], image_file_and_extension[0]))
+        )
+
+    demo_url = None
+    while True:
+        demo_url = (
+            console.ask(
+                "[ Full URL of deployed demo app, e.g. `https://my-app.reflex.run` ] (enter to skip)"
+            )
+            or None
+        )
+        if _validate_url_with_protocol_prefix(demo_url):
+            break
+    if demo_url:
+        params["demo_url"] = demo_url
+
+    # Now send the post request to Reflex backend services.
+    try:
+        console.debug(f"Sending custom component data: {params}")
+        response = httpx.post(
+            POST_CUSTOM_COMPONENTS_GALLERY_ENDPOINT,
+            headers={"Authorization": f"Bearer {access_token}"},
+            data=params,
+            files=files,
+            timeout=POST_CUSTOM_COMPONENTS_GALLERY_TIMEOUT,
+        )
+        response.raise_for_status()
+
+    except httpx.HTTPError as he:
+        console.error(f"Unable to complete request due to {he}.")
+        raise typer.Exit(code=1) from he
+
+    console.info("Custom component information successfully shared!")
+
+
+def _validate_url_with_protocol_prefix(url: str | None) -> bool:
+    """Validate the URL with protocol prefix. Empty string is acceptable.
+
+    Args:
+        url: the URL string to check.
+
+    Returns:
+        Whether the entered URL is acceptable.
+    """
+    return not url or (url.startswith("http://") or url.startswith("https://"))
+
+
+def _get_file_from_prompt_in_loop() -> Tuple[bytes, str] | None:
+    image_file = file_extension = None
+    while image_file is None:
+        image_filepath = console.ask(
+            f"Upload a preview image of your demo app (enter to skip)"
+        )
+        if not image_filepath:
+            break
+        file_extension = image_filepath.split(".")[-1]
+        try:
+            with open(image_filepath, "rb") as f:
+                image_file = f.read()
+                return image_file, file_extension
+        except OSError as ose:
+            console.error(f"Unable to read the {file_extension} file due to {ose}")
+            raise typer.Exit(code=1) from ose
+
+    console.debug(f"File extension detected: {file_extension}")
+    return None
+
+
+@custom_components_cli.command(name="share")
+def share_more_detail(
+    loglevel: constants.LogLevel = typer.Option(
+        config.loglevel, help="The log level to use."
+    ),
+):
+    """Collect more details on the published package for gallery.
+
+    Args:
+        loglevel: The log level to use.
+    """
+    console.set_log_level(loglevel)
+
+    _collect_details_for_gallery()
