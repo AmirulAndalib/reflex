@@ -1,19 +1,21 @@
 """Create a list of components from an iterable."""
+
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, overload
+from typing import Any, Dict, Optional, Union, overload
 
 from reflex.components.base.fragment import Fragment
 from reflex.components.component import BaseComponent, Component, MemoizationLeaf
 from reflex.components.tags import CondTag, Tag
 from reflex.constants import Dirs
 from reflex.constants.colors import Color
-from reflex.style import LIGHT_COLOR_MODE, color_mode
-from reflex.utils import format, imports
+from reflex.style import LIGHT_COLOR_MODE, resolved_color_mode
+from reflex.utils import format
+from reflex.utils.imports import ImportDict, ImportVar
 from reflex.vars import BaseVar, Var, VarData
 
-_IS_TRUE_IMPORT = {
-    f"/{Dirs.STATE_PATH}": [imports.ImportVar(tag="isTrue")],
+_IS_TRUE_IMPORT: ImportDict = {
+    f"/{Dirs.STATE_PATH}": [ImportVar(tag="isTrue")],
 }
 
 
@@ -95,27 +97,28 @@ class Cond(MemoizationLeaf):
             cond_state=f"isTrue({self.cond._var_full_name})",
         )
 
-    def _get_imports(self) -> imports.ImportDict:
-        return imports.merge_imports(
-            super()._get_imports(),
-            getattr(self.cond._var_data, "imports", {}),
-            _IS_TRUE_IMPORT,
+    def add_imports(self) -> ImportDict:
+        """Add imports for the Cond component.
+
+        Returns:
+            The import dict for the component.
+        """
+        cond_imports: dict[str, str | ImportVar | list[str | ImportVar]] = getattr(
+            self.cond._var_data, "imports", {}
         )
+        return {**cond_imports, **_IS_TRUE_IMPORT}
 
 
 @overload
-def cond(condition: Any, c1: Component, c2: Any) -> Component:
-    ...
+def cond(condition: Any, c1: Component, c2: Any) -> Component: ...
 
 
 @overload
-def cond(condition: Any, c1: Component) -> Component:
-    ...
+def cond(condition: Any, c1: Component) -> Component: ...
 
 
 @overload
-def cond(condition: Any, c1: Any, c2: Any) -> Var:
-    ...
+def cond(condition: Any, c1: Any, c2: Any) -> BaseVar: ...
 
 
 def cond(condition: Any, c1: Any, c2: Any = None):
@@ -171,6 +174,11 @@ def cond(condition: Any, c1: Any, c2: Any = None):
     c2 = create_var(c2)
     var_datas.extend([c1._var_data, c2._var_data])
 
+    c1_type = c1._var_type if isinstance(c1, Var) else type(c1)
+    c2_type = c2._var_type if isinstance(c2, Var) else type(c2)
+
+    var_type = c1_type if c1_type == c2_type else Union[c1_type, c2_type]
+
     # Create the conditional var.
     return cond_var._replace(
         _var_name=format.format_cond(
@@ -179,7 +187,7 @@ def cond(condition: Any, c1: Any, c2: Any = None):
             false_value=c2,
             is_prop=True,
         ),
-        _var_type=c1._var_type if isinstance(c1, BaseVar) else type(c1),
+        _var_type=var_type,
         _var_is_local=False,
         _var_full_name_needs_state_prefix=False,
         merge_var_data=VarData.merge(*var_datas),
@@ -197,7 +205,7 @@ def color_mode_cond(light: Any, dark: Any = None) -> Var | Component:
         The conditional component or prop.
     """
     return cond(
-        color_mode == Var.create(LIGHT_COLOR_MODE, _var_is_string=True),
+        resolved_color_mode == Var.create(LIGHT_COLOR_MODE, _var_is_string=True),
         light,
         dark,
     )
