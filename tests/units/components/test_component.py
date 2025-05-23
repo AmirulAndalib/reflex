@@ -911,7 +911,7 @@ def test_custom_component_wrapper():
     assert len(ccomponent.children) == 1
     assert isinstance(ccomponent.children[0], Text)
 
-    component = ccomponent.get_component(ccomponent)
+    component = ccomponent.get_component()
     assert isinstance(component, Box)
 
 
@@ -945,6 +945,22 @@ def test_invalid_event_handler_args(component2, test_state):
         component2.create(on_user_list_changed=test_state.do_something_with_int)
     with pytest.raises(EventHandlerArgTypeMismatchError):
         component2.create(on_user_list_changed=test_state.do_something_with_list_int)
+    with pytest.raises(EventHandlerArgTypeMismatchError):
+        component2.create(
+            on_user_visited_count_changed=test_state.do_something_with_bool()
+        )
+    with pytest.raises(EventHandlerArgTypeMismatchError):
+        component2.create(on_user_list_changed=test_state.do_something_with_int())
+    with pytest.raises(EventHandlerArgTypeMismatchError):
+        component2.create(on_user_list_changed=test_state.do_something_with_list_int())
+
+    component2.create(
+        on_user_visited_count_changed=test_state.do_something_with_bool(False)
+    )
+    component2.create(on_user_list_changed=test_state.do_something_with_int(23))
+    component2.create(
+        on_user_list_changed=test_state.do_something_with_list_int([2321, 321])
+    )
 
     component2.create(on_open=test_state.do_something_with_int)
     component2.create(on_open=test_state.do_something_with_bool)
@@ -1823,7 +1839,7 @@ def test_custom_component_get_imports():
     assert "outer" not in custom_comp._get_all_imports()
 
     # The imports are only resolved during compilation.
-    custom_comp.get_component(custom_comp)
+    custom_comp.get_component()
     _, imports_inner = compile_custom_component(custom_comp)
     assert "inner" in imports_inner
     assert "outer" not in imports_inner
