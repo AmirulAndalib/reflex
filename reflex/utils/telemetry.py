@@ -19,7 +19,12 @@ from reflex.config import environment
 from reflex.utils import console
 from reflex.utils.decorator import once_unless_none
 from reflex.utils.exceptions import ReflexError
-from reflex.utils.prerequisites import ensure_reflex_installation_id, get_project_hash
+from reflex.utils.prerequisites import (
+    ensure_reflex_installation_id,
+    get_bun_version,
+    get_node_version,
+    get_project_hash,
+)
 
 UTC = timezone.utc
 POSTHOG_API_URL: str = "https://app.posthog.com/capture/"
@@ -106,6 +111,8 @@ class _Properties(TypedDict):
     user_os_detail: str
     reflex_version: str
     python_version: str
+    node_version: str | None
+    bun_version: str | None
     cpu_count: int
     memory: int
     cpu_info: dict
@@ -153,6 +160,12 @@ def _get_event_defaults() -> _DefaultEvent | None:
             "user_os_detail": get_detailed_platform_str(),
             "reflex_version": get_reflex_version(),
             "python_version": get_python_version(),
+            "node_version": (
+                str(node_version) if (node_version := get_node_version()) else None
+            ),
+            "bun_version": (
+                str(bun_version) if (bun_version := get_bun_version()) else None
+            ),
             "cpu_count": get_cpu_count(),
             "memory": get_memory(),
             "cpu_info": dataclasses.asdict(cpuinfo) if cpuinfo else {},
@@ -232,6 +245,9 @@ def _send(event: str, telemetry_enabled: bool | None, **kwargs) -> bool:
     return False
 
 
+background_tasks = set()
+
+
 def send(event: str, telemetry_enabled: bool | None = None, **kwargs):
     """Send anonymous telemetry for Reflex.
 
@@ -246,7 +262,9 @@ def send(event: str, telemetry_enabled: bool | None = None, **kwargs):
 
     try:
         # Within an event loop context, send the event asynchronously.
-        asyncio.create_task(async_send(event, telemetry_enabled, **kwargs))
+        task = asyncio.create_task(async_send(event, telemetry_enabled, **kwargs))
+        background_tasks.add(task)
+        task.add_done_callback(background_tasks.discard)
     except RuntimeError:
         # If there is no event loop, send the event synchronously.
         warnings.filterwarnings("ignore", category=RuntimeWarning)
