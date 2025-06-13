@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import functools
 import io
-import json
 import os.path
-import re
 import unittest.mock
 import uuid
 from collections.abc import Generator
@@ -68,8 +66,6 @@ from .states import (
 class EmptyState(BaseState):
     """An empty state."""
 
-    pass
-
 
 @pytest.fixture
 def index_page() -> ComponentCallable:
@@ -105,7 +101,7 @@ class ATestState(BaseState):
     var: int
 
 
-@pytest.fixture()
+@pytest.fixture
 def test_state() -> type[BaseState]:
     """A default state.
 
@@ -115,7 +111,7 @@ def test_state() -> type[BaseState]:
     return ATestState
 
 
-@pytest.fixture()
+@pytest.fixture
 def redundant_test_state() -> type[BaseState]:
     """A default state.
 
@@ -154,12 +150,10 @@ def test_model_auth() -> type[Model]:
     class TestModelAuth(Model, table=True):
         """A test model with auth."""
 
-        pass
-
     return TestModelAuth
 
 
-@pytest.fixture()
+@pytest.fixture
 def test_get_engine():
     """A default database engine.
 
@@ -175,7 +169,7 @@ def test_get_engine():
     )
 
 
-@pytest.fixture()
+@pytest.fixture
 def test_custom_auth_admin() -> type[AuthProvider]:
     """A default auth provider.
 
@@ -191,19 +185,15 @@ def test_custom_auth_admin() -> type[AuthProvider]:
 
         def login(self):  # pyright: ignore [reportIncompatibleMethodOverride]
             """Login."""
-            pass
 
         def is_authenticated(self):  # pyright: ignore [reportIncompatibleMethodOverride]
             """Is authenticated."""
-            pass
 
         def get_admin_user(self):  # pyright: ignore [reportIncompatibleMethodOverride]
             """Get admin user."""
-            pass
 
         def logout(self):  # pyright: ignore [reportIncompatibleMethodOverride]
             """Logout."""
-            pass
 
     return TestAuthProvider
 
@@ -775,7 +765,7 @@ async def test_dict_mutation_detection__plain_list(
         ),
     ],
 )
-async def test_upload_file(tmp_path, state, delta, token: str, mocker):
+async def test_upload_file(tmp_path, state, delta, token: str, mocker: MockerFixture):
     """Test that file upload works correctly.
 
     Args:
@@ -988,7 +978,7 @@ def test_dynamic_arg_shadow(
     windows_platform: bool,
     token: str,
     app_module_mock: unittest.mock.Mock,
-    mocker,
+    mocker: MockerFixture,
 ):
     """Create app with dynamic route var and try to add a page with a dynamic arg that shadows a state var.
 
@@ -1012,7 +1002,7 @@ def test_multiple_dynamic_args(
     windows_platform: bool,
     token: str,
     app_module_mock: unittest.mock.Mock,
-    mocker,
+    mocker: MockerFixture,
 ):
     """Create app with multiple dynamic route vars with the same name.
 
@@ -1037,7 +1027,7 @@ async def test_dynamic_route_var_route_change_completed_on_load(
     windows_platform: bool,
     token: str,
     app_module_mock: unittest.mock.Mock,
-    mocker,
+    mocker: MockerFixture,
 ):
     """Create app with dynamic route var, and simulate navigation.
 
@@ -1220,7 +1210,7 @@ async def test_dynamic_route_var_route_change_completed_on_load(
 
 
 @pytest.mark.asyncio
-async def test_process_events(mocker, token: str):
+async def test_process_events(mocker: MockerFixture, token: str):
     """Test that an event is processed properly and that it is postprocessed
     n+1 times. Also check that the processing flag of the last stateupdate is set to
     False.
@@ -1309,11 +1299,11 @@ def test_overlay_component(
     page = app._pages["test"]
 
     if exp_page_child is not None:
-        assert len(page.children) == 3
+        assert len(page.children) == 4
         children_types = (type(child) for child in page.children)
         assert exp_page_child in children_types  # pyright: ignore [reportOperatorIssue]
     else:
-        assert len(page.children) == 2
+        assert len(page.children) == 3
 
 
 @pytest.fixture
@@ -1333,6 +1323,17 @@ def compilable_app(tmp_path) -> Generator[tuple[App, Path], None, None]:
     web_dir = app_path / ".web"
     web_dir.mkdir(parents=True)
     (web_dir / constants.PackageJson.PATH).touch()
+    (web_dir / constants.Dirs.POSTCSS_JS).touch()
+    (web_dir / constants.Dirs.POSTCSS_JS).write_text(
+        """
+module.exports = {
+  plugins: {
+    "postcss-import": {},
+    autoprefixer: {},
+  },
+};
+""",
+    )
     app = App(theme=None)
     app._get_frontend_packages = unittest.mock.Mock()
     with chdir(app_path):
@@ -1355,11 +1356,13 @@ def test_app_wrap_compile_theme(
     """
     conf = rx.Config(app_name="testing", react_strict_mode=react_strict_mode)
     mocker.patch("reflex.config._get_config", return_value=conf)
-
     app, web_dir = compilable_app
+    mocker.patch("reflex.utils.prerequisites.get_web_dir", return_value=web_dir)
     app.theme = rx.theme(accent_color="plum")
     app._compile()
-    app_js_contents = (web_dir / "pages" / "_app.js").read_text()
+    app_js_contents = (
+        web_dir / constants.Dirs.PAGES / constants.PageNames.APP_ROOT
+    ).read_text()
     app_js_lines = [
         line.strip() for line in app_js_contents.splitlines() if line.strip()
     ]
@@ -1425,7 +1428,9 @@ def test_app_wrap_priority(
 
     app.add_page(page)
     app._compile()
-    app_js_contents = (web_dir / "pages" / "_app.js").read_text()
+    app_js_contents = (
+        web_dir / constants.Dirs.PAGES / constants.PageNames.APP_ROOT
+    ).read_text()
     app_js_lines = [
         line.strip() for line in app_js_contents.splitlines() if line.strip()
     ]
@@ -1583,58 +1588,6 @@ def test_add_page_component_returning_tuple():
     assert str(third_text.children[0].contents) == '"third"'
 
 
-@pytest.mark.parametrize("export", (True, False))
-def test_app_with_transpile_packages(compilable_app: tuple[App, Path], export: bool):
-    class C1(rx.Component):
-        library = "foo@1.2.3"
-        tag = "Foo"
-        transpile_packages: list[str] = ["foo"]
-
-    class C2(rx.Component):
-        library = "bar@4.5.6"
-        tag = "Bar"
-        transpile_packages: list[str] = ["bar@4.5.6"]
-
-    class C3(rx.NoSSRComponent):
-        library = "baz@7.8.10"
-        tag = "Baz"
-        transpile_packages: list[str] = ["baz@7.8.9"]
-
-    class C4(rx.NoSSRComponent):
-        library = "quuc@2.3.4"
-        tag = "Quuc"
-        transpile_packages: list[str] = ["quuc"]
-
-    class C5(rx.Component):
-        library = "quuc"
-        tag = "Quuc"
-
-    app, web_dir = compilable_app
-    page = Fragment.create(
-        C1.create(), C2.create(), C3.create(), C4.create(), C5.create()
-    )
-    app.add_page(page, route="/")
-    app._compile(export=export)
-
-    next_config = (web_dir / "next.config.js").read_text()
-    transpile_packages_match = re.search(r"transpilePackages: (\[.*?\])", next_config)
-    transpile_packages_json = transpile_packages_match.group(1)  # pyright: ignore [reportOptionalMemberAccess]
-    transpile_packages = sorted(json.loads(transpile_packages_json))
-
-    assert transpile_packages == [
-        "bar",
-        "foo",
-        "quuc",
-    ]
-
-    if export:
-        assert 'output: "export"' in next_config
-        assert f'distDir: "{constants.Dirs.STATIC}"' in next_config
-    else:
-        assert 'output: "export"' not in next_config
-        assert f'distDir: "{constants.Dirs.STATIC}"' not in next_config
-
-
 def test_app_with_valid_var_dependencies(compilable_app: tuple[App, Path]):
     app, _ = compilable_app
 
@@ -1725,7 +1678,7 @@ custom_exception_handlers = {
 
 
 @pytest.mark.parametrize(
-    "handler_fn, expected",
+    ("handler_fn", "expected"),
     [
         pytest.param(
             custom_exception_handlers["partial"],
@@ -1788,7 +1741,7 @@ def backend_exception_handler_with_wrong_return_type(exception: Exception) -> in
 
 
 @pytest.mark.parametrize(
-    "handler_fn, expected",
+    ("handler_fn", "expected"),
     [
         pytest.param(
             backend_exception_handler_with_wrong_return_type,

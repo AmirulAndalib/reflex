@@ -3,7 +3,8 @@
 from pathlib import Path
 
 from reflex import constants
-from reflex.config import environment, get_config
+from reflex.config import get_config
+from reflex.environment import environment
 from reflex.utils import build, console, exec, prerequisites, telemetry
 
 
@@ -55,7 +56,7 @@ def export(
 
     if frontend:
         # Ensure module can be imported and app.compile() is called.
-        prerequisites.get_compiled_app(export=True)
+        prerequisites.get_compiled_app(prerender_routes=True)
         # Set up .web directory and install frontend dependencies.
         build.setup_frontend(Path.cwd())
 

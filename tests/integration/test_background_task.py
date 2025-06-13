@@ -229,7 +229,7 @@ def driver(background_task: AppHarness) -> Generator[WebDriver, None, None]:
         driver.quit()
 
 
-@pytest.fixture()
+@pytest.fixture
 def token(background_task: AppHarness, driver: WebDriver) -> str:
     """Get a function that returns the active token.
 
@@ -241,7 +241,9 @@ def token(background_task: AppHarness, driver: WebDriver) -> str:
         The token for the connected client
     """
     assert background_task.app_instance is not None
-    token_input = driver.find_element(By.ID, "token")
+    token_input = background_task.poll_for_result(
+        lambda: driver.find_element(By.ID, "token")
+    )
     assert token_input
 
     # wait for the backend connection to send the token

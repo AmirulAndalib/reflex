@@ -114,10 +114,6 @@ class ImportVar:
     # The path of the package to import from.
     package_path: str = "/"
 
-    # whether this import package should be added to transpilePackages in next.config.js
-    # https://nextjs.org/docs/app/api-reference/next-config-js/transpilePackages
-    transpile: bool | None = False
-
     @property
     def name(self) -> str:
         """The name of the import.
@@ -127,10 +123,11 @@ class ImportVar:
         """
         if self.alias:
             return (
-                self.alias if self.is_default else " as ".join([self.tag, self.alias])  # pyright: ignore [reportCallIssue,reportArgumentType]
+                self.alias
+                if self.is_default
+                else (self.tag + " as " + self.alias if self.tag else self.alias)
             )
-        else:
-            return self.tag or ""
+        return self.tag or ""
 
 
 ImportTypes = str | ImportVar | list[str | ImportVar] | list[ImportVar]

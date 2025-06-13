@@ -40,7 +40,7 @@ def NavigationApp():
         return rx.text("Internal")
 
 
-@pytest.fixture()
+@pytest.fixture
 def navigation_app(tmp_path) -> Generator[AppHarness, None, None]:
     """Start NavigationApp app at tmp_path via AppHarness.
 
@@ -74,11 +74,13 @@ async def test_navigation_app(navigation_app: AppHarness):
 
     with poll_for_navigation(driver):
         internal_link.click()
-    assert urlsplit(driver.current_url).path == "/internal/"
+    assert urlsplit(driver.current_url).path == "/internal"
     with poll_for_navigation(driver):
         driver.back()
 
-    external_link = driver.find_element(By.ID, "external")
+    external_link = navigation_app.poll_for_result(
+        lambda: driver.find_element(By.ID, "external")
+    )
     external2_link = driver.find_element(By.ID, "external2")
 
     external_link.click()

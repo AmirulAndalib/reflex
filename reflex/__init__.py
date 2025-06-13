@@ -279,12 +279,7 @@ _MAPPING: dict = {
     "components.el.elements.media": ["image"],
     "components.lucide": ["icon"],
     **COMPONENTS_BASE_MAPPING,
-    "components.suneditor": [
-        "editor",
-        "EditorButtonList",
-        "EditorOptions",
-    ],
-    "components": ["el", "radix", "lucide", "recharts", "next"],
+    "components": ["el", "radix", "lucide", "recharts"],
     "components.markdown": ["markdown"],
     **RADIX_MAPPING,
     "components.plotly": ["plotly"],
@@ -361,6 +356,7 @@ _SUBMODULES: set[str] = {
     "vars",
     "config",
     "compiler",
+    "plugins",
 }
 _SUBMOD_ATTRS: dict = _MAPPING
 getattr, __dir__, __all__ = lazy_loader.attach(

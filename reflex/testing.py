@@ -28,6 +28,7 @@ import psutil
 import uvicorn
 
 import reflex
+import reflex.environment
 import reflex.reflex
 import reflex.utils.build
 import reflex.utils.exec
@@ -35,7 +36,8 @@ import reflex.utils.format
 import reflex.utils.prerequisites
 import reflex.utils.processes
 from reflex.components.component import CustomComponent
-from reflex.config import environment, get_config
+from reflex.config import get_config
+from reflex.environment import environment
 from reflex.state import (
     BaseState,
     StateManager,
@@ -155,9 +157,8 @@ class AppHarness:
                 app_name = f"{func_name}_{slug_suffix}"
                 app_name = re.sub(r"[^a-zA-Z0-9_]", "_", app_name)
             elif isinstance(app_source, str):
-                raise ValueError(
-                    "app_name must be provided when app_source is a string."
-                )
+                msg = "app_name must be provided when app_source is a string."
+                raise ValueError(msg)
             else:
                 app_name = app_source.__name__
 
@@ -285,7 +286,8 @@ class AppHarness:
             self.app_instance._state_manager, StateManagerRedis
         ):
             if self.app_instance._state is None:
-                raise RuntimeError("State is not set.")
+                msg = "State is not set."
+                raise RuntimeError(msg)
             # Create our own redis connection for testing.
             self.state_manager = StateManagerRedis.create(self.app_instance._state)
         else:
@@ -299,7 +301,8 @@ class AppHarness:
 
     def _get_backend_shutdown_handler(self):
         if self.backend is None:
-            raise RuntimeError("Backend was not initialized.")
+            msg = "Backend was not initialized."
+            raise RuntimeError(msg)
 
         original_shutdown = self.backend.shutdown
 
@@ -330,7 +333,8 @@ class AppHarness:
 
     def _start_backend(self, port: int = 0):
         if self.app_asgi is None:
-            raise RuntimeError("App was not initialized.")
+            msg = "App was not initialized."
+            raise RuntimeError(msg)
         self.backend = uvicorn.Server(
             uvicorn.Config(
                 app=self.app_asgi,
@@ -340,8 +344,12 @@ class AppHarness:
         )
         self.backend.shutdown = self._get_backend_shutdown_handler()
         with chdir(self.app_path):
+            print(  # noqa: T201
+                "Creating backend in a new thread..."
+            )  # for pytest diagnosis
             self.backend_thread = threading.Thread(target=self.backend.run)
         self.backend_thread.start()
+        print("Backend started.")  # for pytest diagnosis #noqa: T201
 
     async def _reset_backend_state_manager(self):
         """Reset the StateManagerRedis event loop affinity.
@@ -366,16 +374,21 @@ class AppHarness:
                 state=self.app_instance._state,
             )
             if not isinstance(self.app_instance.state_manager, StateManagerRedis):
-                raise RuntimeError("Failed to reset state manager.")
+                msg = "Failed to reset state manager."
+                raise RuntimeError(msg)
 
     def _start_frontend(self):
         # Set up the frontend.
         with chdir(self.app_path):
             config = reflex.config.get_config()
+            print("Polling for servers...")  # for pytest diagnosis #noqa: T201
             config.api_url = "http://{}:{}".format(
-                *self._poll_for_servers().getsockname(),
+                *self._poll_for_servers(timeout=30).getsockname(),
             )
+            print("Building frontend...")  # for pytest diagnosis #noqa: T201
             reflex.utils.build.setup_frontend(self.app_path)
+
+        print("Frontend starting...")  # for pytest diagnosis #noqa: T201
 
         # Start the frontend.
         self.frontend_process = reflex.utils.processes.new_process(
@@ -387,26 +400,28 @@ class AppHarness:
                 "dev",
             ],
             cwd=self.app_path / reflex.utils.prerequisites.get_web_dir(),
-            env={"PORT": "0"},
+            env={"PORT": "0", "NO_COLOR": "1"},
             **FRONTEND_POPEN_ARGS,
         )
 
     def _wait_frontend(self):
+        if self.frontend_process is None or self.frontend_process.stdout is None:
+            msg = "Frontend process has no stdout."
+            raise RuntimeError(msg)
         while self.frontend_url is None:
-            line = (
-                self.frontend_process.stdout.readline()  # pyright: ignore [reportOptionalMemberAccess]
-            )
+            line = self.frontend_process.stdout.readline()
             if not line:
                 break
             print(line)  # for pytest diagnosis #noqa: T201
-            m = re.search(reflex.constants.Next.FRONTEND_LISTENING_REGEX, line)
+            m = re.search(reflex.constants.ReactRouter.FRONTEND_LISTENING_REGEX, line)
             if m is not None:
                 self.frontend_url = m.group(1)
                 config = reflex.config.get_config()
                 config.deploy_url = self.frontend_url
                 break
         if self.frontend_url is None:
-            raise RuntimeError("Frontend did not start")
+            msg = "Frontend did not start"
+            raise RuntimeError(msg)
 
         def consume_frontend_output():
             while True:
@@ -578,20 +593,23 @@ class AppHarness:
             TimeoutError: when server or sockets are not ready
         """
         if self.backend is None:
-            raise RuntimeError("Backend is not running.")
+            msg = "Backend is not running."
+            raise RuntimeError(msg)
         backend = self.backend
         # check for servers to be initialized
         if not self._poll_for(
             target=lambda: getattr(backend, "servers", False),
             timeout=timeout,
         ):
-            raise TimeoutError("Backend servers are not initialized.")
+            msg = "Backend servers are not initialized."
+            raise TimeoutError(msg)
         # check for sockets to be listening
         if not self._poll_for(
             target=lambda: getattr(backend.servers[0], "sockets", False),
             timeout=timeout,
         ):
-            raise TimeoutError("Backend is not listening.")
+            msg = "Backend is not listening."
+            raise TimeoutError(msg)
         return backend.servers[0].sockets[0]
 
     def frontend(
@@ -619,12 +637,14 @@ class AppHarness:
             RuntimeError: when selenium is not importable or frontend is not running
         """
         if not has_selenium:
-            raise RuntimeError(
+            msg = (
                 "Frontend functionality requires `selenium` to be installed, "
                 "and it could not be imported."
             )
+            raise RuntimeError(msg)
         if self.frontend_url is None:
-            raise RuntimeError("Frontend is not running.")
+            msg = "Frontend is not running."
+            raise RuntimeError(msg)
         want_headless = False
         if environment.APP_HARNESS_HEADLESS.get():
             want_headless = True
@@ -650,7 +670,8 @@ class AppHarness:
             if want_headless:
                 driver_options.add_argument("headless")
         if driver_options is None:
-            raise RuntimeError(f"Could not determine options for {driver_clz}")
+            msg = f"Could not determine options for {driver_clz}"
+            raise RuntimeError(msg)
         if args := environment.APP_HARNESS_DRIVER_ARGS.get():
             for arg in args.split(","):
                 driver_options.add_argument(arg)
@@ -680,7 +701,8 @@ class AppHarness:
             RuntimeError: when the app hasn't started running
         """
         if self.state_manager is None:
-            raise RuntimeError("state_manager is not set.")
+            msg = "state_manager is not set."
+            raise RuntimeError(msg)
         try:
             return await self.state_manager.get_state(token)
         finally:
@@ -698,7 +720,8 @@ class AppHarness:
             RuntimeError: when the app hasn't started running
         """
         if self.state_manager is None:
-            raise RuntimeError("state_manager is not set.")
+            msg = "state_manager is not set."
+            raise RuntimeError(msg)
         state = await self.get_state(token)
         for key, value in kwargs.items():
             setattr(state, key, value)
@@ -722,9 +745,11 @@ class AppHarness:
             RuntimeError: when the app hasn't started running
         """
         if self.state_manager is None:
-            raise RuntimeError("state_manager is not set.")
+            msg = "state_manager is not set."
+            raise RuntimeError(msg)
         if self.app_instance is None:
-            raise RuntimeError("App is not running.")
+            msg = "App is not running."
+            raise RuntimeError(msg)
         app_state_manager = self.app_instance.state_manager
         if isinstance(self.state_manager, StateManagerRedis):
             # Temporarily replace the app's state manager with our own, since
@@ -761,9 +786,8 @@ class AppHarness:
             target=lambda: element.text != exp_not_equal,
             timeout=timeout,
         ):
-            raise TimeoutError(
-                f"{element} content remains {exp_not_equal!r} while polling.",
-            )
+            msg = f"{element} content remains {exp_not_equal!r} while polling."
+            raise TimeoutError(msg)
         return element.text
 
     def poll_for_value(
@@ -792,9 +816,8 @@ class AppHarness:
             target=lambda: element.get_attribute("value") not in exp_not_equal,
             timeout=timeout,
         ):
-            raise TimeoutError(
-                f"{element} content remains {exp_not_equal!r} while polling.",
-            )
+            msg = f"{element} content remains {exp_not_equal!r} while polling."
+            raise TimeoutError(msg)
         return element.get_attribute("value")
 
     def poll_for_clients(self, timeout: TimeoutType = None) -> dict[str, BaseState]:
@@ -812,16 +835,50 @@ class AppHarness:
             ValueError: when the state_manager is not a memory state manager
         """
         if self.app_instance is None:
-            raise RuntimeError("App is not running.")
+            msg = "App is not running."
+            raise RuntimeError(msg)
         state_manager = self.app_instance.state_manager
         if not isinstance(state_manager, (StateManagerMemory, StateManagerDisk)):
-            raise ValueError("Only works with memory or disk state manager")
+            msg = "Only works with memory or disk state manager"
+            raise ValueError(msg)
         if not self._poll_for(
             target=lambda: state_manager.states,
             timeout=timeout,
         ):
-            raise TimeoutError("No states were observed while polling.")
+            msg = "No states were observed while polling."
+            raise TimeoutError(msg)
         return state_manager.states
+
+    @staticmethod
+    def poll_for_result(
+        f: Callable[[], T],
+        exception: type[Exception] = Exception,
+        max_attempts: int = 5,
+        seconds_between_attempts: int = 1,
+    ) -> T:
+        """Poll for a result from a function.
+
+        Args:
+            f: function to call
+            exception: exception to catch
+            max_attempts: maximum number of attempts
+            seconds_between_attempts: seconds to wait between
+
+        Returns:
+            Result of the function
+
+        Raises:
+            AssertionError: if the function does not return a value
+        """
+        attempts = 0
+        while attempts < max_attempts:
+            try:
+                return f()
+            except exception:  # noqa: PERF203
+                attempts += 1
+                time.sleep(seconds_between_attempts)
+        msg = "Function did not return a value"
+        raise AssertionError(msg)
 
 
 class SimpleHTTPRequestHandlerCustomErrors(SimpleHTTPRequestHandler):
@@ -905,7 +962,7 @@ class Subdir404TCPServer(socketserver.TCPServer):
 class AppHarnessProd(AppHarness):
     """AppHarnessProd executes a reflex app in-process for testing.
 
-    In prod mode, instead of running `next dev` the app is exported as static
+    In prod mode, instead of running `react-router dev` the app is exported as static
     files and served via the builtin python http.server with custom 404 redirect
     handling. Additionally, the backend runs in multi-worker mode.
     """
@@ -920,7 +977,7 @@ class AppHarnessProd(AppHarness):
             / reflex.constants.Dirs.STATIC
         )
         error_page_map = {
-            404: web_root / "404.html",
+            404: web_root / "404" / "index.html",
         }
         with Subdir404TCPServer(
             ("", 0),
@@ -937,9 +994,11 @@ class AppHarnessProd(AppHarness):
         # Set up the frontend.
         with chdir(self.app_path):
             config = reflex.config.get_config()
+            print("Polling for servers...")  # for pytest diagnosis #noqa: T201
             config.api_url = "http://{}:{}".format(
-                *self._poll_for_servers().getsockname(),
+                *self._poll_for_servers(timeout=30).getsockname(),
             )
+            print("Building frontend...")  # for pytest diagnosis #noqa: T201
 
             get_config().loglevel = reflex.constants.LogLevel.INFO
 
@@ -956,17 +1015,21 @@ class AppHarnessProd(AppHarness):
                 env=reflex.constants.Env.PROD,
             )
 
+        print("Frontend starting...")  # for pytest diagnosis #noqa: T201
+
         self.frontend_thread = threading.Thread(target=self._run_frontend)
         self.frontend_thread.start()
 
     def _wait_frontend(self):
         self._poll_for(lambda: self.frontend_server is not None)
         if self.frontend_server is None or not self.frontend_server.socket.fileno():
-            raise RuntimeError("Frontend did not start")
+            msg = "Frontend did not start"
+            raise RuntimeError(msg)
 
     def _start_backend(self):
         if self.app_asgi is None:
-            raise RuntimeError("App was not initialized.")
+            msg = "App was not initialized."
+            raise RuntimeError(msg)
         environment.REFLEX_SKIP_COMPILE.set(True)
         self.backend = uvicorn.Server(
             uvicorn.Config(
@@ -977,8 +1040,12 @@ class AppHarnessProd(AppHarness):
             ),
         )
         self.backend.shutdown = self._get_backend_shutdown_handler()
+        print(  # noqa: T201
+            "Creating backend in a new thread..."
+        )
         self.backend_thread = threading.Thread(target=self.backend.run)
         self.backend_thread.start()
+        print("Backend started.")  # for pytest diagnosis #noqa: T201
 
     def _poll_for_servers(self, timeout: TimeoutType = None) -> socket.socket:
         try:

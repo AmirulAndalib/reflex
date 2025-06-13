@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import time
+import asyncio
 from collections.abc import Generator
 
 import pytest
@@ -29,6 +29,14 @@ def ClientSide():
     class ClientSideState(rx.State):
         state_var: str = ""
         input_value: str = ""
+
+        @rx.event
+        def set_state_var(self, value: str):
+            self.state_var = value
+
+        @rx.event
+        def set_input_value(self, value: str):
+            self.input_value = value
 
     class ClientSideSubState(ClientSideState):
         # cookies with default settings
@@ -167,7 +175,7 @@ def driver(client_side: AppHarness) -> Generator[WebDriver, None, None]:
         driver.quit()
 
 
-@pytest.fixture()
+@pytest.fixture
 def local_storage(driver: WebDriver) -> Generator[utils.LocalStorage, None, None]:
     """Get an instance of the local storage helper.
 
@@ -182,7 +190,7 @@ def local_storage(driver: WebDriver) -> Generator[utils.LocalStorage, None, None
     ls.clear()
 
 
-@pytest.fixture()
+@pytest.fixture
 def session_storage(driver: WebDriver) -> Generator[utils.SessionStorage, None, None]:
     """Get an instance of the session storage helper.
 
@@ -243,7 +251,9 @@ async def test_client_side_state(
     assert client_side.frontend_url is not None
 
     def poll_for_token():
-        token_input = driver.find_element(By.ID, "token")
+        token_input = client_side.poll_for_result(
+            lambda: driver.find_element(By.ID, "token")
+        )
         assert token_input
 
         # wait for the backend connection to send the token
@@ -430,7 +440,7 @@ async def test_client_side_state(
         "secure": False,
         "value": "c3%20value",
     }
-    time.sleep(2)  # wait for c3 to expire
+    await asyncio.sleep(2)  # wait for c3 to expire
     if not isinstance(driver, Firefox):
         # Note: Firefox does not remove expired cookies Bug 576347
         assert f"{sub_state_name}.c3" not in cookie_info_map(driver)
@@ -473,10 +483,10 @@ async def test_client_side_state(
 
     # navigate to the /foo route
     with utils.poll_for_navigation(driver):
-        driver.get(client_side.frontend_url + "/foo")
+        driver.get(client_side.frontend_url.removesuffix("/") + "/foo/")
 
     # get new references to all cookie and local storage elements
-    c1 = driver.find_element(By.ID, "c1")
+    c1 = client_side.poll_for_result(lambda: driver.find_element(By.ID, "c1"))
     c2 = driver.find_element(By.ID, "c2")
     c3 = driver.find_element(By.ID, "c3")
     c4 = driver.find_element(By.ID, "c4")
@@ -518,7 +528,9 @@ async def test_client_side_state(
     driver.refresh()
 
     # wait for the backend connection to send the token (again)
-    token_input = driver.find_element(By.ID, "token")
+    token_input = client_side.poll_for_result(
+        lambda: driver.find_element(By.ID, "token")
+    )
     assert token_input
     token = client_side.poll_for_value(token_input)
     assert token is not None
@@ -684,10 +696,7 @@ async def test_client_side_state(
             _substate_key(token or "", sub_state_name)
         )
         state = root_state.substates[client_side.get_state_name("_client_side_state")]
-        sub_state = state.substates[
-            client_side.get_state_name("_client_side_sub_state")
-        ]
-        return sub_state
+        return state.substates[client_side.get_state_name("_client_side_sub_state")]
 
     async def poll_for_c1_set():
         sub_state = await get_sub_state()
@@ -724,7 +733,9 @@ async def test_client_side_state(
     driver.refresh()
 
     # wait for the backend connection to send the token (again)
-    token_input = driver.find_element(By.ID, "token")
+    token_input = client_side.poll_for_result(
+        lambda: driver.find_element(By.ID, "token")
+    )
     assert token_input
     token = client_side.poll_for_value(token_input)
     assert token is not None

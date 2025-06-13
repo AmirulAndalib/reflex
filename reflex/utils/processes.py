@@ -19,7 +19,7 @@ from redis.exceptions import RedisError
 from rich.progress import Progress
 
 from reflex import constants
-from reflex.config import environment
+from reflex.environment import environment
 from reflex.utils import console, path_ops, prerequisites
 from reflex.utils.registry import get_npm_registry
 
@@ -137,11 +137,10 @@ def handle_port(service_name: str, port: int, auto_increment: bool) -> int:
         return port
     if auto_increment:
         return change_port(port, service_name)
-    else:
-        console.error(
-            f"{service_name.capitalize()} port: {port} is already in use by PID: {process.pid}."
-        )
-        raise click.exceptions.Exit()
+    console.error(
+        f"{service_name.capitalize()} port: {port} is already in use by PID: {process.pid}."
+    )
+    raise click.exceptions.Exit
 
 
 @overload
@@ -316,7 +315,6 @@ def stream_logs(
                 # But if the process is still running that is weird.
                 raise
             # If the process exited, break out of the loop for post processing.
-            pass
 
     # Check if the process failed (not printing the logs for SIGINT).
 
@@ -414,12 +412,12 @@ def show_progress(message: str, process: subprocess.Popen, checkpoints: list[str
         task = progress.add_task(f"{message}: ", total=len(checkpoints))
         for line in stream_logs(message, process, progress=progress):
             # Check for special strings and update the progress bar.
-            for special_string in checkpoints:
-                if special_string in line:
-                    progress.update(task, advance=1)
-                    if special_string == checkpoints[-1]:
-                        progress.update(task, completed=len(checkpoints))
-                    break
+            special_string = checkpoints[0]
+            if special_string in line:
+                progress.update(task, advance=1)
+                checkpoints.pop(0)
+            if not checkpoints:
+                break
 
 
 def atexit_handler():
