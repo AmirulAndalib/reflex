@@ -54,7 +54,7 @@ def _inherited_variant_selector(
 class AccordionComponent(RadixPrimitiveComponent):
     """Base class for all @radix-ui/accordion components."""
 
-    library = "@radix-ui/react-accordion@1.2.10"
+    library = "@radix-ui/react-accordion@1.2.11"
 
     # The color scheme of the component.
     color_scheme: Var[LiteralAccentColor]
@@ -334,7 +334,11 @@ class AccordionHeader(AccordionComponent):
         Returns:
             The style of the component.
         """
-        return {"display": "flex"}
+        return {
+            "display": "flex",
+            # Reset some values to ensure consistent styling without tailwind reset.
+            "margin": "0",
+        }
 
 
 class AccordionTrigger(AccordionComponent):
@@ -399,6 +403,9 @@ class AccordionTrigger(AccordionComponent):
                     "color": "var(--accent-contrast)",
                 },
             },
+            # Reset some values to ensure consistent styling without tailwind reset.
+            "background": "none",
+            "border": "none",
         }
 
 
